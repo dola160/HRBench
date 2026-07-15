@@ -1,0 +1,1482 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Hệ Thống Kiểm Tra Hiệu Năng Phần Cứng Thực Tế (Benchmark)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Tối ưu hóa render để các phép thử hoạt ảnh chạy chính xác nhất */
+        .benchmark-sandbox {
+            position: relative;
+            overflow: hidden;
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.75rem;
+            min-height: 480px;
+            contain: layout paint;
+            transition: all 0.3s ease;
+        }
+        
+        /* Chế độ Toàn Màn Hình Giả Lập (Virtual Fullscreen) - Khắc phục chặn iFrame */
+        .virtual-fullscreen-active {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 9999 !important;
+            background: #ffffff !important;
+            padding: 1rem !important;
+            margin: 0 !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            display: flex !important;
+            flex-direction: column !important;
+        }
+
+        .virtual-fullscreen-active .benchmark-sandbox {
+            flex-grow: 1 !important;
+            min-height: auto !important;
+        }
+
+        /* Hiệu ứng xoay mượt mà cho phần tử quay */
+        @keyframes custom-spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .anim-spin-fast {
+            animation: custom-spin 0.2s linear infinite;
+        }
+        /* Kiểu cuộn mượt cho bài test cuộn trang */
+        .smooth-scroll-box {
+            scroll-behavior: smooth;
+        }
+        /* Khóa tương tác kéo zoom trên thiết bị di động khi đang chạy test */
+        .sandbox-locked {
+            touch-action: none !important;
+            user-select: none !important;
+            -webkit-user-drag: none !important;
+        }
+        /* Vô hiệu hóa hành vi cuộn mặc định của body khi đang khóa hệ thống */
+        .body-scroll-lock {
+            overflow: hidden !important;
+            touch-action: none !important;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 font-sans antialiased min-h-screen flex flex-col justify-between transition-colors duration-300">
+
+    <!-- Header -->
+    <header class="border-b border-gray-200 bg-white sticky top-0 z-50 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-3 h-3 rounded-full bg-red-500 id-pulse animate-pulse"></div>
+                <h1 class="text-xl font-bold tracking-tight text-gray-800">HARDWARE REAL BENCHMARK</h1>
+            </div>
+            <div class="flex items-center gap-2">
+                <span id="system-status" class="px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">Sẵn sàng</span>
+                <span id="ai-status" class="px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">AI Monitor: Đang ngủ</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 py-6 flex-grow w-full grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        <!-- Bảng điều khiển & Đo số liệu (Trái) -->
+        <section class="lg:col-span-4 flex flex-col gap-6">
+            
+            <!-- Bộ chỉ số nhận diện thiết bị & thông số khởi điểm -->
+            <div class="bg-white p-5 rounded-2xl border border-indigo-100 shadow-sm">
+                <h2 class="text-xs font-bold uppercase tracking-wider text-indigo-500 mb-3 flex items-center gap-2">
+                    <span>🔍 Nhận diện cấu hình tự động</span>
+                    <span class="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                </h2>
+                <div class="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 flex items-center gap-3">
+                    <div class="text-3xl" id="device-icon">📱</div>
+                    <div>
+                        <div class="text-xs text-gray-400">Dòng thiết bị nhận diện</div>
+                        <div class="text-sm font-bold text-indigo-900" id="device-detected-type">Đang phân tích...</div>
+                        <div class="text-[10px] text-indigo-700/80 mt-0.5" id="device-specs-sub">Khổ màn hình: Đang tính toán...</div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3 mt-3">
+                    <div class="bg-gray-50/70 p-2.5 rounded-lg border border-gray-100 text-center">
+                        <div class="text-[9px] text-gray-400 uppercase font-bold">Tải Khởi Điểm</div>
+                        <div class="text-sm font-black text-gray-700 mt-0.5" id="profile-start-load">0</div>
+                    </div>
+                    <div class="bg-gray-50/70 p-2.5 rounded-lg border border-gray-100 text-center">
+                        <div class="text-[9px] text-gray-400 uppercase font-bold">Ngưỡng An Toàn</div>
+                        <div class="text-sm font-black text-gray-700 mt-0.5" id="profile-max-cap">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bộ chỉ số hiệu năng thực tế -->
+            <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+                <h2 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-4">Chỉ số phần cứng thực tế</h2>
+                
+                <div class="grid grid-cols-2 gap-4 mb-6">
+                    <div class="bg-gray-50 p-4 rounded-xl text-center border border-gray-100">
+                        <div class="text-xs text-gray-500 font-medium">FPS Hiện Tại</div>
+                        <div id="metric-fps" class="text-4xl font-extrabold text-green-600 mt-1">0</div>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded-xl text-center border border-gray-100">
+                        <div class="text-xs text-gray-500 font-medium">Độ Trễ Khung Hình</div>
+                        <div id="metric-frametime" class="text-xl font-bold text-gray-700 mt-2">0 ms</div>
+                    </div>
+                </div>
+
+                <div class="space-y-3">
+                    <div class="flex justify-between items-center pb-2 border-b border-gray-100 text-sm">
+                        <span class="text-gray-500">Mức độ tải hiện tại (Phần tử)</span>
+                        <span id="metric-load-current" class="font-semibold text-gray-800">0</span>
+                    </div>
+                    <div class="flex justify-between items-center pb-2 border-b border-gray-100 text-sm">
+                        <span class="text-gray-500">Tải trung bình</span>
+                        <span id="metric-load-avg" class="font-semibold text-gray-800">0</span>
+                    </div>
+                    <div class="flex justify-between items-center pb-2 border-b border-gray-100 text-sm">
+                        <span class="text-gray-500">Tải tối đa chịu được</span>
+                        <span id="metric-load-max" class="font-semibold text-green-600">0</span>
+                    </div>
+                    <div class="flex justify-between items-center pb-2 border-b border-gray-100 text-sm">
+                        <span class="text-gray-500">Tải tối thiểu ghi nhận</span>
+                        <span id="metric-load-min" class="font-semibold text-red-500">0</span>
+                    </div>
+                    <div class="flex justify-between items-center text-sm">
+                        <span class="text-gray-500">Cảm nhận Lag (Chỉ số AI)</span>
+                        <span id="metric-ai-lag" class="font-bold text-blue-600">Mượt mà</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Nút điều khiển -->
+            <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex flex-col gap-3">
+                <h2 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Bảng Điều Khiển</h2>
+                
+                <button id="btn-auto-test" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-xl transition duration-200 shadow-md flex items-center justify-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    BẮT ĐẦU AUTO 10 PHÚT TEST
+                </button>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <button id="btn-toggle-auto-ai" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 px-3 rounded-xl text-sm transition duration-150">
+                        Bật Auto AI Tải
+                    </button>
+                    <button id="btn-stop" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-2.5 px-3 rounded-xl text-sm transition duration-150">
+                        DỪNG LẠI
+                    </button>
+                </div>
+
+                <button id="btn-reset" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 px-4 rounded-xl text-sm transition duration-150 border border-gray-200">
+                    LÀM MỚI (RESET)
+                </button>
+
+                <div class="mt-2 text-[11px] text-gray-400 leading-relaxed text-center">
+                    * AI thông minh liên tục theo dõi Frame Jitter để tự động tăng số lượng hiệu năng khi mượt và giảm nhẹ khi thiết bị bắt đầu giật lag thực tế.
+                </div>
+            </div>
+
+            <!-- Danh sách 10 bước Test -->
+            <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex-grow">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xs font-bold uppercase tracking-wider text-gray-400">Tiến trình 10 Bước (60s/bước)</h2>
+                    <span id="timer-display" class="font-mono text-sm font-bold text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-full">00:00</span>
+                </div>
+                
+                <div id="test-steps-list" class="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                    <!-- Javascript sinh 10 bước ở đây -->
+                </div>
+            </div>
+
+        </section>
+
+        <!-- Khung Sandbox Hiển Thị Thực Tế (Phải) -->
+        <section class="lg:col-span-8 flex flex-col gap-4" id="sandbox-wrapper">
+            <div class="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col flex-grow h-full">
+                
+                <!-- Thanh thông tin bài test hiện tại -->
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 mb-4 border-b border-gray-100">
+                    <div>
+                        <div class="text-xs font-semibold text-indigo-600 uppercase tracking-widest" id="current-step-badge">Hệ Thống Rảnh Rỗi</div>
+                        <h2 class="text-lg font-bold text-gray-800" id="current-step-title">Hãy chọn Bắt đầu để kiểm tra hiệu năng thiết bị</h2>
+                    </div>
+                    <div class="text-right flex items-center gap-3 sm:justify-end">
+                        <!-- Nút thoát nhanh chế độ toàn màn hình ảo nếu cần -->
+                        <button id="btn-exit-virtual-fs" class="hidden bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-1 px-3 rounded-lg text-xs border border-gray-300">
+                            Thoát Toàn Màn Hình ✕
+                        </button>
+                        <div>
+                            <div class="text-xs text-gray-400">Đang thực thi trên phần cứng</div>
+                            <div class="text-xs font-semibold text-gray-700" id="sandbox-elements-count">Số phần tử: 0</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Khu vực giả lập trực quan (Hộp Sandbox lớn) -->
+                <div class="benchmark-sandbox flex-grow relative bg-white border border-gray-200 rounded-xl p-2" id="sandbox">
+                    
+                    <!-- Văn bản chào mừng / Trạng thái rảnh rỗi (Có thể di chuyển trượt lên khi chạy) -->
+                    <div id="sandbox-intro-text" class="absolute inset-0 flex flex-col items-center justify-center text-center p-6 z-30 bg-white transition-all duration-500 ease-in-out transform translate-y-0 opacity-100">
+                        <div class="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-4 shadow-sm">
+                            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                        </div>
+                        <h3 class="text-base font-bold text-gray-800 mb-1">Kiểm Tra Hiệu Năng Thực Tế (Không giả lập)</h3>
+                        <p class="text-xs text-gray-500 leading-relaxed max-w-md">
+                            Nhấn nút "BẮT ĐẦU AUTO 10 PHÚT TEST" để hệ thống lần lượt chạy 10 kịch bản cực nặng. Mỗi kịch bản kéo dài đúng 60 giây và sẽ tự tăng tải lượng DOM/Tính toán cho đến khi hệ thống của bạn đạt ngưỡng giới hạn.
+                        </p>
+                    </div>
+
+                    <!-- Khung kết xuất chuyên dụng (Được cách ly hoàn toàn) -->
+                    <div id="sandbox-content" class="w-full h-full absolute inset-0 overflow-hidden"></div>
+                </div>
+
+                <!-- Thanh tiến trình tổng thể -->
+                <div class="mt-4 pt-2 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
+                    <span>Thời gian còn lại của bước hiện tại: <strong id="step-time-left" class="font-mono text-gray-700">0s</strong></span>
+                    <span>Chu kỳ AI kiểm thử: <strong id="ai-cycle-count" class="font-mono text-gray-700">0</strong></span>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Hộp thông báo / Toast tuỳ chỉnh thay cho Alert -->
+    <div id="custom-toast" class="fixed bottom-4 right-4 bg-gray-900 text-white text-xs px-4 py-3 rounded-xl shadow-2xl transition-all duration-300 transform translate-y-20 opacity-0 pointer-events-none z-50 flex items-center gap-2">
+        <span id="toast-message">Thông báo ở đây</span>
+    </div>
+
+    <!-- Footer -->
+    <footer class="border-t border-gray-200 bg-white py-4 text-center text-xs text-gray-400">
+        <div class="max-w-7xl mx-auto px-4">
+            Đo đạc dựa trên tài nguyên CPU/GPU thực thi trực tiếp trên luồng chính của trình duyệt (Main Thread Render).
+        </div>
+    </footer>
+
+    <!-- Logic Script kiểm tra hiệu năng -->
+    <script>
+        // Cấu hình danh sách 10 bước nặng nhất
+        const STEPS_CONFIG = [
+            { id: 1, name: "Vẽ/render số lượng lớn hình tròn thật", desc: "Render liên tục các thẻ div tròn di chuyển bằng CSS Transform trực tiếp trên khung nhìn." },
+            { id: 2, name: "Cuộn trang liên tục với tải nội dung nặng", desc: "Tạo và tự động cuộn lên xuống liên tục qua hàng nghìn dòng văn bản được định dạng phức tạp." },
+            { id: 3, name: "Thay đổi màu sắc toàn bộ giao diện", desc: "Thay đổi màu nền, viền và đổ bóng của các phần tử DOM liên tiếp để bắt GPU vẽ lại liên tục (Repaint)." },
+            { id: 4, name: "Đánh chữ tự động tốc độ cao", desc: "Mô phỏng nhập liệu văn bản với tốc độ siêu nhanh vào các hộp văn bản lớn để ép trình duyệt tính toán Layout liên tục." },
+            { id: 5, name: "Phóng to/thu nhỏ liên tục nhiều đối tượng", desc: "Co giãn quy mô (Scale) liên hồi toàn bộ khung chứa nhằm vắt kiệt hiệu năng Composite." },
+            { id: 6, name: "Kéo và thả nhiều đối tượng cùng lúc", desc: "Tự động dịch chuyển kéo thả ngẫu nhiên các phần tử va chạm, kiểm tra khả năng xử lý Reflow." },
+            { id: 7, name: "Xoay liên tục tốc độ cao nhiều đối tượng", desc: "Bắt hàng trăm phần tử xoay đa chiều 2D/3D liên tục, thử thách khả năng xử lý đồ họa phần cứng." },
+            { id: 8, name: "Chạy đồng thời nhiều loại hoạt ảnh nặng", desc: "Kết hợp di chuyển, mờ đục, nhảy múa ngẫu nhiên và biến đổi hình khối DOM đồng loạt." },
+            { id: 9, name: "Tải và hiển thị số lượng lớn ảnh cùng lúc", desc: "Chèn hàng loạt ảnh SVG động và ảnh phân giải cao ngẫu nhiên để kích hoạt giải nén ảnh liên hồi." },
+            { id: 10, name: "Mở nhiều khung nội dung nặng đồng thời", desc: "Sinh liên tục các hộp thông tin dạng lồng nhau chồng chéo, kích hoạt các lớp đổ bóng phức tạp nhất." }
+        ];
+
+        // Khởi tạo thông tin cấu hình phần cứng mặc định
+        let deviceProfile = {
+            type: "Đang phân tích...",
+            startingLoad: 50,
+            maxCap: 1500,
+            scaleFactor: 1.2, 
+            icon: "💻"
+        };
+
+        // Khởi tạo các biến quản lý trạng thái
+        let activeStep = 0; // 0 nghĩa là chưa chạy bước nào, 1-10 là đang chạy
+        let isAutoMode = false; // Chế độ tự động chạy 10 bước
+        let isAutoLoadAI = true; // Chế độ AI tự động tăng/giảm lượng tải dựa trên độ lag thực tế
+        
+        let currentLoad = 50; 
+        let maxLoadRecorded = 0;
+        let minLoadRecorded = 999999;
+        let totalLoadRecorded = 0;
+        let loadRecordsCount = 0;
+
+        let fps = 0;
+        let frameCount = 0;
+        let lastTime = performance.now();
+        let frameTime = 0;
+        let lastFrameTime = performance.now();
+        let frameTimeHistory = [];
+
+        // Hệ thống lưu trữ lịch sử để kết xuất Bảng Điểm
+        let benchmarkMetricsHistory = [];
+        let currentStepFpsSamples = [];
+        let currentStepMaxLoad = 0;
+
+        // Quản lý thời gian chạy
+        let stepSecondsLeft = 60;
+        let globalTimerInterval = null;
+
+        // Lưu giữ danh sách phần tử trong Sandbox
+        let activeElements = [];
+        let sandboxInterval = null;
+        let aiCycleCounter = 0;
+
+        // DOM elements
+        const sandbox = document.getElementById("sandbox");
+        const sandboxWrapper = document.getElementById("sandbox-wrapper");
+        const sandboxIntro = document.getElementById("sandbox-intro-text");
+        const sandboxContent = document.getElementById("sandbox-content");
+        const stepsListContainer = document.getElementById("test-steps-list");
+        const btnExitVirtualFs = document.getElementById("btn-exit-virtual-fs");
+        
+        // Buttons
+        const btnAutoTest = document.getElementById("btn-auto-test");
+        const btnToggleAutoAI = document.getElementById("btn-toggle-auto-ai");
+        const btnStop = document.getElementById("btn-stop");
+        const btnReset = document.getElementById("btn-reset");
+
+        // Metrics Display
+        const metricFps = document.getElementById("metric-fps");
+        const metricFrameTime = document.getElementById("metric-frametime");
+        const metricLoadCurrent = document.getElementById("metric-load-current");
+        const metricLoadAvg = document.getElementById("metric-load-avg");
+        const metricLoadMax = document.getElementById("metric-load-max");
+        const metricLoadMin = document.getElementById("metric-load-min");
+        const metricAiLag = document.getElementById("metric-ai-lag");
+        
+        const systemStatus = document.getElementById("system-status");
+        const aiStatus = document.getElementById("ai-status");
+        const timerDisplay = document.getElementById("timer-display");
+        const currentStepBadge = document.getElementById("current-step-badge");
+        const currentStepTitle = document.getElementById("current-step-title");
+        const sandboxElementsCount = document.getElementById("sandbox-elements-count");
+        const stepTimeLeft = document.getElementById("step-time-left");
+        const aiCycleCount = document.getElementById("ai-cycle-count");
+
+        // KHÓA TƯƠNG TÁC TẬP TRUNG TOÀN CỤC
+        const preventDefaultActions = (e) => {
+            e.preventDefault();
+        };
+
+        const preventKeys = (e) => {
+            if (e.ctrlKey && (e.key === '=' || e.key === '-' || e.key === '0' || e.key === '+')) {
+                e.preventDefault();
+            }
+            if ([' ', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(e.key)) {
+                e.preventDefault();
+            }
+        };
+
+        function lockGlobalInteractions() {
+            document.body.classList.add("body-scroll-lock");
+            window.addEventListener("wheel", preventDefaultActions, { passive: false });
+            window.addEventListener("touchmove", preventDefaultActions, { passive: false });
+            window.addEventListener("keydown", preventKeys, { passive: false });
+            window.addEventListener("gesturestart", preventDefaultActions, { passive: false });
+        }
+
+        function unlockGlobalInteractions() {
+            document.body.classList.remove("body-scroll-lock");
+            window.removeEventListener("wheel", preventDefaultActions);
+            window.removeEventListener("touchmove", preventDefaultActions);
+            window.removeEventListener("keydown", preventKeys);
+            window.removeEventListener("gesturestart", preventDefaultActions);
+        }
+
+        // TỰ ĐỘNG BẬT CHẾ ĐỘ TOÀN MÀN HÌNH (KẾT HỢP GỐC VÀ GIẢ LẬP ĐỂ ĐẢM BẢO HOẠT ĐỘNG 100%)
+        function enterFullscreen() {
+            // 1. Kích hoạt toàn màn hình ảo bằng CSS (Hoạt động tuyệt đối, bỏ qua chặn iFrame)
+            sandboxWrapper.classList.add("virtual-fullscreen-active");
+            btnExitVirtualFs.classList.remove("hidden");
+
+            // 2. Kích hoạt toàn màn hình gốc của trình duyệt nếu được cho phép
+            const docEl = document.documentElement;
+            if (docEl.requestFullscreen) {
+                docEl.requestFullscreen().catch(err => {
+                    console.log("Không thể tự động bật Fullscreen gốc (Do cấu hình iFrame hạn chế): ", err);
+                });
+            } else if (docEl.webkitRequestFullscreen) { /* Safari / iOS */
+                docEl.webkitRequestFullscreen();
+            } else if (docEl.msRequestFullscreen) { /* IE11 */
+                docEl.msRequestFullscreen();
+            }
+        }
+
+        // TỰ ĐỘNG THOÁT CHẾ ĐỘ TOÀN MÀN HÌNH
+        function exitFullscreen() {
+            // 1. Thoát toàn màn hình ảo CSS
+            sandboxWrapper.classList.remove("virtual-fullscreen-active");
+            btnExitVirtualFs.classList.add("hidden");
+
+            // 2. Thoát toàn màn hình gốc của trình duyệt
+            if (document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement) {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen().catch(err => console.log("Lỗi thoát Fullscreen: ", err));
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                } else if (document.msExitFullscreen) {
+                    document.msExitFullscreen();
+                }
+            }
+        }
+
+        // PHÁT HIỆN THIẾT BỊ VÀ THIẾT LẬP CẤU HÌNH TƯƠNG THÍCH CHUẨN XÁC
+        function detectDeviceAndCalibrate() {
+            const ua = navigator.userAgent;
+            const screenW = window.screen.width;
+            const screenH = window.screen.height;
+            const winW = window.innerWidth || document.documentElement.clientWidth;
+            const hasTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+            const cores = navigator.hardwareConcurrency || 4;
+
+            let type = "Máy tính để bàn (Desktop)";
+            let startingLoad = 200;
+            let maxCap = 5000;
+            let scaleFactor = 1.2; 
+            let icon = "🖥️";
+
+            // 1. Phân loại chuẩn Điện thoại (Mobile)
+            if (/Mobi|Android|iPhone|iPod/i.test(ua) || (hasTouch && winW < 640)) {
+                type = "Điện thoại (Mobile)";
+                startingLoad = 35; 
+                maxCap = 600;
+                scaleFactor = 1.3; 
+                icon = "📱";
+            } 
+            // 2. Phân loại Máy tính bảng / iPad / Pad
+            else if (/Tablet|iPad|PlayBook|Silk/i.test(ua) || (hasTouch && winW >= 640 && winW <= 1024)) {
+                type = "Máy tính bảng (Pad)";
+                startingLoad = 80;
+                maxCap = 1200;
+                scaleFactor = 1.2; 
+                icon = "📟";
+            } 
+            // 3. Phân loại Máy tính xách tay (Laptop)
+            else if (winW >= 1024 && winW <= 1536 && screenH <= 900) {
+                type = "Máy tính xách tay (Laptop)";
+                startingLoad = 120;
+                maxCap = 2500;
+                scaleFactor = 1.1; 
+                icon = "💻";
+            }
+
+            deviceProfile = { type, startingLoad, maxCap, scaleFactor, icon };
+
+            // Cập nhật lên giao diện trực quan
+            document.getElementById("device-icon").innerText = icon;
+            document.getElementById("device-detected-type").innerText = type;
+            document.getElementById("device-specs-sub").innerText = `Cores: ${cores} | Màn hình: ${winW}x${window.innerHeight} | Tỉ lệ vẽ: ${scaleFactor}x`;
+            document.getElementById("profile-start-load").innerText = startingLoad;
+            document.getElementById("profile-max-cap").innerText = maxCap;
+
+            currentLoad = startingLoad;
+        }
+
+        // Khởi tạo giao diện 10 bước trong danh sách
+        function renderStepsList() {
+            stepsListContainer.innerHTML = "";
+            STEPS_CONFIG.forEach(step => {
+                const stepEl = document.createElement("div");
+                stepEl.id = `step-card-${step.id}`;
+                stepEl.className = "p-3 rounded-xl border border-gray-200 bg-white transition duration-200 flex items-start gap-3 cursor-pointer hover:border-indigo-300";
+                stepEl.innerHTML = `
+                    <div class="step-num w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-500 shrink-0">
+                        ${step.id}
+                    </div>
+                    <div>
+                        <h4 class="text-xs font-bold text-gray-700 step-title">${step.name}</h4>
+                        <p class="text-[10px] text-gray-400 mt-0.5 leading-relaxed">${step.desc}</p>
+                    </div>
+                `;
+                stepEl.addEventListener("click", () => {
+                    selectAndRunStep(step.id);
+                });
+                stepsListContainer.appendChild(stepEl);
+            });
+        }
+
+        // Cập nhật giao diện danh sách bước đang chạy
+        function updateStepsListUI() {
+            STEPS_CONFIG.forEach(step => {
+                const card = document.getElementById(`step-card-${step.id}`);
+                const numBox = card.querySelector(".step-num");
+                const titleText = card.querySelector(".step-title");
+                
+                if (step.id === activeStep) {
+                    card.className = "p-3 rounded-xl border-2 border-indigo-600 bg-indigo-50/40 transition duration-200 flex items-start gap-3 cursor-pointer";
+                    numBox.className = "step-num w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-xs font-bold text-white shrink-0";
+                    titleText.className = "text-xs font-bold text-indigo-900 step-title";
+                } else if (step.id < activeStep) {
+                    card.className = "p-3 rounded-xl border border-emerald-200 bg-emerald-50/20 transition duration-200 flex items-start gap-3 cursor-pointer opacity-75";
+                    numBox.className = "step-num w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center text-xs font-bold text-white shrink-0";
+                    titleText.className = "text-xs font-bold text-gray-600 step-title";
+                } else {
+                    card.className = "p-3 rounded-xl border border-gray-100 bg-white transition duration-200 flex items-start gap-3 cursor-pointer hover:border-indigo-200";
+                    numBox.className = "step-num w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-500 shrink-0";
+                    titleText.className = "text-xs font-bold text-gray-700 step-title";
+                }
+            });
+        }
+
+        // Bộ đo FPS & Frame Time chính xác bằng requestAnimationFrame (Không giả lập)
+        function runPerformanceTracker() {
+            const now = performance.now();
+            frameCount++;
+            
+            const currentFrameTime = now - lastFrameTime;
+            lastFrameTime = now;
+            
+            frameTimeHistory.push(currentFrameTime);
+            if (frameTimeHistory.length > 60) {
+                frameTimeHistory.shift();
+            }
+
+            if (now >= lastTime + 500) {
+                fps = Math.round((frameCount * 1000) / (now - lastTime));
+                frameCount = 0;
+                lastTime = now;
+
+                const avgFrameTime = frameTimeHistory.reduce((a, b) => a + b, 0) / frameTimeHistory.length;
+                frameTime = avgFrameTime;
+
+                metricFps.innerText = fps;
+                metricFrameTime.innerText = `${frameTime.toFixed(1)} ms`;
+                
+                if (activeStep > 0) {
+                    currentStepFpsSamples.push(fps);
+                    if (currentLoad > currentStepMaxLoad) {
+                        currentStepMaxLoad = currentLoad;
+                    }
+                }
+
+                if (fps >= 55) {
+                    metricFps.className = "text-4xl font-extrabold text-green-600 mt-1";
+                } else if (fps >= 30) {
+                    metricFps.className = "text-4xl font-extrabold text-amber-500 mt-1";
+                } else {
+                    metricFps.className = "text-4xl font-extrabold text-red-500 mt-1";
+                }
+            }
+            requestAnimationFrame(runPerformanceTracker);
+        }
+
+        // AI PHÁT HIỆN LAG THÔNG MINH
+        function runAILagDetection() {
+            if (activeStep === 0) return;
+
+            aiCycleCounter++;
+            aiCycleCount.innerText = aiCycleCounter;
+
+            let jitterMax = 0;
+            if (frameTimeHistory.length > 10) {
+                for (let i = 1; i < frameTimeHistory.length; i++) {
+                    const diff = Math.abs(frameTimeHistory[i] - frameTimeHistory[i-1]);
+                    if (diff > jitterMax) jitterMax = diff;
+                }
+            }
+
+            let lagStatus = "smooth"; 
+            let lagText = "Mượt mà";
+            let colorClass = "text-green-600 font-bold";
+
+            if (frameTime > 32 || jitterMax > 25) { 
+                lagStatus = "heavy-lag";
+                lagText = "LAG DỮ DỘI (Sắp nghẽn)";
+                colorClass = "text-red-600 font-extrabold animate-pulse";
+            } else if (frameTime > 20 || jitterMax > 12) { 
+                lagStatus = "micro-lag";
+                lagText = "Giật nhẹ (Hơi nghẽn)";
+                colorClass = "text-amber-500 font-bold";
+            } else {
+                lagStatus = "smooth";
+                lagText = "Rất mượt";
+                colorClass = "text-emerald-600 font-bold";
+            }
+
+            metricAiLag.innerText = lagText;
+            metricAiLag.className = colorClass;
+
+            if (isAutoLoadAI) {
+                if (lagStatus === "smooth") {
+                    const increment = Math.max(5, Math.floor(currentLoad * 0.15));
+                    currentLoad = Math.min(deviceProfile.maxCap, currentLoad + increment);
+                    aiStatus.innerText = "AI Monitor: Tăng tải (+ " + increment + ")";
+                    aiStatus.className = "px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800";
+                } else if (lagStatus === "micro-lag") {
+                    currentLoad = Math.min(deviceProfile.maxCap, currentLoad + 1);
+                    aiStatus.innerText = "AI Monitor: Giữ mức tối ưu";
+                    aiStatus.className = "px-3 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800";
+                } else if (lagStatus === "heavy-lag") {
+                    const decrement = Math.max(2, Math.floor(currentLoad * 0.08));
+                    currentLoad = Math.max(deviceProfile.startingLoad, currentLoad - decrement);
+                    aiStatus.innerText = "AI Monitor: Giảm tải bảo vệ (- " + decrement + ")";
+                    aiStatus.className = "px-3 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800";
+                }
+
+                if (currentLoad > maxLoadRecorded) maxLoadRecorded = currentLoad;
+                if (currentLoad < minLoadRecorded && currentLoad > 0) minLoadRecorded = currentLoad;
+                
+                totalLoadRecorded += currentLoad;
+                loadRecordsCount++;
+
+                metricLoadCurrent.innerText = currentLoad;
+                metricLoadMax.innerText = maxLoadRecorded;
+                metricLoadMin.innerText = minLoadRecorded === 999999 ? 0 : minLoadRecorded;
+                metricLoadAvg.innerText = Math.round(totalLoadRecorded / loadRecordsCount);
+
+                syncSandboxElements();
+            }
+        }
+
+        function syncSandboxElements() {
+            sandboxElementsCount.innerText = `Số phần tử: ${currentLoad}`;
+            if (activeStep === 0) return;
+            executeStepAction(activeStep, true); 
+        }
+
+        // Chạy kịch bản riêng cho từng bài Test trong 10 bước nặng nhất
+        function executeStepAction(stepId, isSyncOnly = false) {
+            if (!isSyncOnly) {
+                // 1. Kích hoạt toàn bộ màn hình (Cả Virtual CSS + Native)
+                enterFullscreen();
+
+                // 2. Tự động cuộn tịnh tiến đưa khung hoạt động Sandbox vào vùng nhìn trung tâm
+                sandboxWrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                // 3. Kích hoạt khóa cứng chống cuộn màn hình và thu phóng bừa bãi
+                lockGlobalInteractions();
+
+                // 4. Ẩn trượt bảng chào rảnh rỗi lên trên mượt mà
+                sandboxIntro.classList.remove("translate-y-0", "opacity-100");
+                sandboxIntro.classList.add("-translate-y-full", "opacity-0", "pointer-events-none");
+                sandbox.classList.add("sandbox-locked"); 
+                
+                clearSandboxIntervals();
+                sandboxContent.innerHTML = "";
+                activeElements = [];
+            }
+
+            const rect = sandbox.getBoundingClientRect();
+            const width = rect.width || 600;
+            const height = rect.height || 450;
+            const sizeScale = deviceProfile.scaleFactor; 
+
+            switch(stepId) {
+                case 1: // Vẽ/render số lượng lớn hình tròn thật di chuyển
+                    adjustElementsCount(currentLoad, () => {
+                        const el = document.createElement("div");
+                        el.className = "absolute rounded-full pointer-events-none opacity-80 border border-indigo-400";
+                        const size = (Math.random() * 35 + 20) * sizeScale;
+                        el.style.width = `${size}px`;
+                        el.style.height = `${size}px`;
+                        el.style.left = `${Math.random() * (width - size)}px`;
+                        el.style.top = `${Math.random() * (height - size)}px`;
+                        el.style.backgroundColor = `hsl(${Math.random() * 360}, 85%, 65%)`;
+                        
+                        el.dataset.dx = (Math.random() - 0.5) * 6;
+                        el.dataset.dy = (Math.random() - 0.5) * 6;
+                        
+                        sandboxContent.appendChild(el);
+                        return el;
+                    });
+
+                    if (!isSyncOnly) {
+                        sandboxInterval = setInterval(() => {
+                            const w = sandboxContent.clientWidth;
+                            const h = sandboxContent.clientHeight;
+                            activeElements.forEach(el => {
+                                let x = parseFloat(el.style.left);
+                                let y = parseFloat(el.style.top);
+                                let dx = parseFloat(el.dataset.dx);
+                                let dy = parseFloat(el.dataset.dy);
+                                const size = parseFloat(el.style.width);
+
+                                x += dx;
+                                y += dy;
+
+                                if (x <= 0 || x >= w - size) { dx = -dx; x = Math.max(0, Math.min(x, w - size)); }
+                                if (y <= 0 || y >= h - size) { dy = -dy; y = Math.max(0, Math.min(y, h - size)); }
+
+                                el.style.left = `${x}px`;
+                                el.style.top = `${y}px`;
+                                el.dataset.dx = dx;
+                                el.dataset.dy = dy;
+                            });
+                        }, 16);
+                    }
+                    break;
+
+                case 2: // Cuộn trang liên tục với tải nội dung nặng thật
+                    if (!isSyncOnly) {
+                        const wrapper = document.createElement("div");
+                        wrapper.id = "scroll-wrapper";
+                        wrapper.className = "w-full h-full absolute inset-0 overflow-y-auto p-4 smooth-scroll-box space-y-3";
+                        sandboxContent.appendChild(wrapper);
+                        activeElements = [wrapper];
+                    }
+                    
+                    const scrollWrapper = document.getElementById("scroll-wrapper");
+                    if (scrollWrapper) {
+                        const childCount = scrollWrapper.children.length;
+                        if (childCount < currentLoad) {
+                            for (let i = childCount; i < currentLoad; i++) {
+                                const card = document.createElement("div");
+                                card.className = "p-4 bg-white border border-gray-100 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 flex flex-col gap-2";
+                                card.innerHTML = `
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-xs font-bold text-indigo-600">CARD #${i}</span>
+                                        <span class="text-[10px] text-gray-400">Load Factor: High</span>
+                                    </div>
+                                    <h4 class="text-xs font-bold text-gray-800">Cơ chế kết xuất luồng đồ họa nâng cao</h4>
+                                    <p class="text-[10px] text-gray-500 leading-relaxed">
+                                        Nội dung văn bản nặng để tăng độ chịu tải CPU khi phân rã dòng. Mã kiểm soát: ${Math.random().toString(36).substring(7)}.
+                                    </p>
+                                    <div class="h-1 bg-gray-100 rounded-full overflow-hidden">
+                                        <div class="h-full bg-indigo-500 rounded-full" style="width: ${Math.random() * 100}%"></div>
+                                    </div>
+                                `;
+                                scrollWrapper.appendChild(card);
+                            }
+                        } else if (childCount > currentLoad) {
+                            for (let i = childCount - 1; i >= currentLoad; i--) {
+                                if (scrollWrapper.children[i]) scrollWrapper.children[i].remove();
+                            }
+                        }
+
+                        if (!isSyncOnly) {
+                            let scrollDirection = 1;
+                            sandboxInterval = setInterval(() => {
+                                if (!scrollWrapper) return;
+                                const maxScroll = scrollWrapper.scrollHeight - scrollWrapper.clientHeight;
+                                if (scrollWrapper.scrollTop >= maxScroll - 10) {
+                                    scrollDirection = -1;
+                                } else if (scrollWrapper.scrollTop <= 10) {
+                                    scrollDirection = 1;
+                                }
+                                scrollWrapper.scrollTop += (8 * scrollDirection);
+                            }, 16); 
+                        }
+                    }
+                    break;
+
+                case 3: // Thay đổi màu sắc toàn bộ giao diện liên tục thật (Repaint Stress)
+                    adjustElementsCount(currentLoad, () => {
+                        const el = document.createElement("div");
+                        el.className = "absolute rounded border transition-all duration-75 shadow-lg pointer-events-none";
+                        const size = (Math.random() * 45 + 25) * sizeScale;
+                        el.style.width = `${size}px`;
+                        el.style.height = `${size}px`;
+                        el.style.left = `${Math.random() * (width - size)}px`;
+                        el.style.top = `${Math.random() * (height - size)}px`;
+                        sandboxContent.appendChild(el);
+                        return el;
+                    });
+
+                    if (!isSyncOnly) {
+                        sandboxInterval = setInterval(() => {
+                            activeElements.forEach(el => {
+                                const hVal = Math.random() * 360;
+                                el.style.backgroundColor = `hsl(${hVal}, 90%, 60%)`;
+                                el.style.borderColor = `hsl(${(hVal + 180) % 360}, 90%, 40%)`;
+                                el.style.boxShadow = `0px 10px 15px -3px hsla(${hVal}, 90%, 40%, 0.4)`;
+                                el.style.borderRadius = Math.random() > 0.5 ? "50%" : "8px";
+                            });
+                        }, 100);
+                    }
+                    break;
+
+                case 4: // Đánh chữ tự động tốc độ cao thật (Reflow & Layout)
+                    if (!isSyncOnly) {
+                        const gridContainer = document.createElement("div");
+                        gridContainer.id = "typewriter-grid";
+                        gridContainer.className = "w-full h-full absolute inset-0 p-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 overflow-y-auto";
+                        sandboxContent.appendChild(gridContainer);
+                        activeElements = [gridContainer];
+                    }
+
+                    const grid = document.getElementById("typewriter-grid");
+                    if (grid) {
+                        const cellCount = grid.children.length;
+                        if (cellCount < currentLoad) {
+                            for (let i = cellCount; i < currentLoad; i++) {
+                                const inputEl = document.createElement("textarea");
+                                inputEl.className = "p-2 border border-gray-300 rounded text-[10px] resize-none h-16 w-full focus:outline-none focus:ring-1 focus:ring-indigo-500";
+                                inputEl.placeholder = `Input #${i}`;
+                                grid.appendChild(inputEl);
+                            }
+                        } else if (cellCount > currentLoad) {
+                            for (let i = cellCount - 1; i >= currentLoad; i--) {
+                                if (grid.children[i]) grid.children[i].remove();
+                            }
+                        }
+
+                        if (!isSyncOnly) {
+                            const rawText = "Hệ thống kiểm tra hiệu năng thực tế hoạt động hoàn toàn trên luồng đồ họa gốc của thiết bị để tìm điểm tới hạn...";
+                            let charIndex = 0;
+                            sandboxInterval = setInterval(() => {
+                                const textareas = grid.getElementsByTagName("textarea");
+                                charIndex = (charIndex + 1) % rawText.length;
+                                const subText = rawText.substring(0, charIndex + 1);
+                                for (let ta of textareas) {
+                                    ta.value = subText;
+                                    ta.scrollTop = ta.scrollHeight; 
+                                }
+                            }, 50);
+                        }
+                    }
+                    break;
+
+                case 5: // Phóng to/thu nhỏ liên tục toàn bộ container (Scale / Composite)
+                    if (!isSyncOnly) {
+                        const zoomContainer = document.createElement("div");
+                        zoomContainer.id = "zoom-container";
+                        zoomContainer.className = "w-full h-full absolute inset-0 flex flex-wrap items-center justify-center p-4 gap-2 transition-transform duration-300 ease-in-out origin-center";
+                        sandboxContent.appendChild(zoomContainer);
+                        activeElements = [zoomContainer];
+                    }
+
+                    const zContainer = document.getElementById("zoom-container");
+                    if (zContainer) {
+                        const childCount = zContainer.children.length;
+                        if (childCount < currentLoad) {
+                            for (let i = childCount; i < currentLoad; i++) {
+                                const card = document.createElement("div");
+                                const widthCard = 16 * sizeScale;
+                                const heightCard = 16 * sizeScale;
+                                card.className = "rounded-xl bg-indigo-500/10 border border-indigo-200 flex flex-col items-center justify-center p-1 text-center shrink-0 shadow-sm";
+                                card.style.width = `${widthCard}rem`;
+                                card.style.height = `${heightCard}rem`;
+                                card.innerHTML = `
+                                    <span class="text-[9px] font-black text-indigo-700">ZOOM</span>
+                                    <div class="w-4 h-4 rounded-full bg-indigo-600 mt-1 animate-ping"></div>
+                                `;
+                                zContainer.appendChild(card);
+                            }
+                        } else if (childCount > currentLoad) {
+                            for (let i = childCount - 1; i >= currentLoad; i--) {
+                                if (zContainer.children[i]) zContainer.children[i].remove();
+                            }
+                        }
+
+                        if (!isSyncOnly) {
+                            let scaleState = 1.0;
+                            let scaleDir = 0.05;
+                            sandboxInterval = setInterval(() => {
+                                if (!zContainer) return;
+                                scaleState += scaleDir;
+                                if (scaleState >= 1.8) {
+                                    scaleDir = -0.05;
+                                } else if (scaleState <= 0.5) {
+                                    scaleDir = 0.05;
+                                }
+                                zContainer.style.transform = `scale(${scaleState})`;
+                            }, 40);
+                        }
+                    }
+                    break;
+
+                case 6: // Kéo và thả nhiều đối tượng cùng lúc (Drag-Drop Simulation)
+                    adjustElementsCount(currentLoad, () => {
+                        const el = document.createElement("div");
+                        el.className = "absolute p-2 bg-yellow-100 border border-yellow-500 rounded text-[9px] text-yellow-800 font-semibold shadow flex items-center gap-1 select-none pointer-events-none";
+                        el.innerHTML = `📌 <span>DRAG-${Math.floor(Math.random() * 1000)}</span>`;
+                        const sizeX = 85 * sizeScale;
+                        const sizeY = 35 * sizeScale;
+                        el.style.width = `${sizeX}px`;
+                        el.style.height = `${sizeY}px`;
+                        el.style.left = `${Math.random() * (width - sizeX)}px`;
+                        el.style.top = `${Math.random() * (height - sizeY)}px`;
+                        
+                        el.dataset.targetX = el.style.left;
+                        el.dataset.targetY = el.style.top;
+                        
+                        sandboxContent.appendChild(el);
+                        return el;
+                    });
+
+                    if (!isSyncOnly) {
+                        sandboxInterval = setInterval(() => {
+                            const w = sandboxContent.clientWidth;
+                            const h = sandboxContent.clientHeight;
+                            activeElements.forEach(el => {
+                                let curX = parseFloat(el.style.left);
+                                let curY = parseFloat(el.style.top);
+                                let tarX = parseFloat(el.dataset.targetX);
+                                let tarY = parseFloat(el.dataset.targetY);
+
+                                const sizeX = parseFloat(el.style.width);
+                                const sizeY = parseFloat(el.style.height);
+
+                                if (Math.abs(curX - tarX) < 10 && Math.abs(curY - tarY) < 10) {
+                                    tarX = Math.random() * (w - sizeX);
+                                    tarY = Math.random() * (h - sizeY);
+                                    el.dataset.targetX = tarX;
+                                    el.dataset.targetY = tarY;
+                                    el.className = "absolute p-2 bg-yellow-200 border-2 border-yellow-600 rounded text-[9px] text-yellow-900 font-bold shadow-xl flex items-center gap-1 select-none pointer-events-none transition-all";
+                                }
+
+                                curX += (tarX - curX) * 0.12;
+                                curY += (tarY - curY) * 0.12;
+
+                                el.style.left = `${curX}px`;
+                                el.style.top = `${curY}px`;
+                            });
+                        }, 20);
+                    }
+                    break;
+
+                case 7: // Xoay liên tục tốc độ cao nhiều đối tượng (Rotational Stress)
+                    adjustElementsCount(currentLoad, () => {
+                        const el = document.createElement("div");
+                        el.className = "absolute rounded bg-gradient-to-tr from-pink-500 to-rose-500 flex items-center justify-center pointer-events-none anim-spin-fast shadow-md";
+                        const size = (Math.random() * 35 + 25) * sizeScale;
+                        el.style.width = `${size}px`;
+                        el.style.height = `${size}px`;
+                        el.style.left = `${Math.random() * (width - size)}px`;
+                        el.style.top = `${Math.random() * (height - size)}px`;
+                        
+                        const innerCore = document.createElement("div");
+                        innerCore.className = "w-3 h-3 rounded-full bg-white";
+                        el.appendChild(innerCore);
+
+                        sandboxContent.appendChild(el);
+                        return el;
+                    });
+                    break;
+
+                case 8: // Chạy đồng thời nhiều loại hoạt ảnh nặng (Multi-Animation Combo)
+                    adjustElementsCount(currentLoad, () => {
+                        const el = document.createElement("div");
+                        el.className = "absolute rounded-lg border text-[8px] font-bold text-center flex items-center justify-center select-none pointer-events-none transition-all duration-300";
+                        const size = 50 * sizeScale;
+                        el.style.width = `${size}px`;
+                        el.style.height = `${size}px`;
+                        el.style.left = `${Math.random() * (width - size)}px`;
+                        el.style.top = `${Math.random() * (height - size)}px`;
+                        
+                        el.dataset.phase = Math.random() * Math.PI * 2;
+                        el.dataset.speed = 0.05 + Math.random() * 0.05;
+                        
+                        sandboxContent.appendChild(el);
+                        return el;
+                    });
+
+                    if (!isSyncOnly) {
+                        sandboxInterval = setInterval(() => {
+                            const w = sandboxContent.clientWidth;
+                            const h = sandboxContent.clientHeight;
+                            activeElements.forEach((el, index) => {
+                                let phase = parseFloat(el.dataset.phase) + parseFloat(el.dataset.speed);
+                                el.dataset.phase = phase;
+
+                                const moveX = Math.sin(phase) * 15;
+                                const moveY = Math.cos(phase) * 15;
+                                const scale = 1 + Math.sin(phase * 2) * 0.3;
+                                const rotate = phase * 57.2958; 
+
+                                el.style.transform = `translate(${moveX}px, ${moveY}px) scale(${scale}) rotate(${rotate}deg)`;
+                                el.style.opacity = 0.5 + Math.abs(Math.sin(phase)) * 0.5;
+                                
+                                const colorHue = (index * 20 + phase * 20) % 360;
+                                el.style.backgroundColor = `hsla(${colorHue}, 80%, 65%, 0.2)`;
+                                el.style.borderColor = `hsl(${colorHue}, 80%, 45%)`;
+                                el.style.color = `hsl(${colorHue}, 80%, 35%)`;
+                                el.innerText = `C-${Math.floor(phase % 100)}`;
+                            });
+                        }, 25);
+                    }
+                    break;
+
+                case 9: // Tải và hiển thị số lượng lớn ảnh cùng lúc (Image Rendering Strain)
+                    adjustElementsCount(currentLoad, () => {
+                        const el = document.createElement("div");
+                        el.className = "absolute overflow-hidden bg-gray-100 rounded border border-gray-300 pointer-events-none shadow-sm";
+                        const size = (Math.random() * 45 + 35) * sizeScale;
+                        el.style.width = `${size}px`;
+                        el.style.height = `${size}px`;
+                        el.style.left = `${Math.random() * (width - size)}px`;
+                        el.style.top = `${Math.random() * (height - size)}px`;
+
+                        const img = document.createElement("img");
+                        img.className = "w-full h-full object-cover";
+                        const seed = Math.floor(Math.random() * 360);
+                        img.src = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'><rect width='100' height='100' fill='hsl(${seed}, 70%, 80%)'/><polygon points='10,90 50,10 90,90' fill='hsl(${(seed+120)%360}, 70%, 50%)'/><circle cx='50' cy='60' r='20' fill='hsl(${(seed+240)%360}, 70%, 40%)'/></svg>`;
+                        
+                        el.appendChild(img);
+                        sandboxContent.appendChild(el);
+                        return el;
+                    });
+
+                    if (!isSyncOnly) {
+                        sandboxInterval = setInterval(() => {
+                            const w = sandboxContent.clientWidth;
+                            const h = sandboxContent.clientHeight;
+                            activeElements.forEach(el => {
+                                if (Math.random() > 0.8) {
+                                    const size = parseFloat(el.style.width);
+                                    el.style.left = `${Math.random() * (w - size)}px`;
+                                    el.style.top = `${Math.random() * (h - size)}px`;
+                                }
+                            });
+                        }, 100);
+                    }
+                    break;
+
+                case 10: // Mở nhiều khung nội dung nặng đồng thời (Complex Overlap Stacking)
+                    adjustElementsCount(currentLoad, () => {
+                        const el = document.createElement("div");
+                        el.className = "absolute p-3 bg-white border-2 border-red-500 rounded-xl shadow-2xl pointer-events-none select-none overflow-hidden max-w-[150px]";
+                        const sizeX = 135 * sizeScale;
+                        const sizeY = 95 * sizeScale;
+                        el.style.width = `${sizeX}px`;
+                        el.style.height = `${sizeY}px`;
+                        el.style.left = `${Math.random() * (width - sizeX)}px`;
+                        el.style.top = `${Math.random() * (height - sizeY)}px`;
+                        el.style.zIndex = Math.floor(Math.random() * 100);
+
+                        el.innerHTML = `
+                            <div class="flex items-center gap-1 text-[9px] font-extrabold text-red-600 mb-1">
+                                <span class="w-1.5 h-1.5 rounded-full bg-red-600 animate-ping"></span> SYSTEM CRITICAL
+                            </div>
+                            <div class="text-[8px] text-gray-500 font-mono space-y-0.5">
+                                <p>MEM: ${(Math.random() * 100).toFixed(1)}%</p>
+                                <p>GPU: ${(Math.random() * 100).toFixed(1)}%</p>
+                                <p>SYS_STRESS: MAX</p>
+                            </div>
+                        `;
+                        sandboxContent.appendChild(el);
+                        return el;
+                    });
+
+                    if (!isSyncOnly) {
+                        sandboxInterval = setInterval(() => {
+                            activeElements.forEach(el => {
+                                const shakeX = (Math.random() - 0.5) * 4;
+                                const shakeY = (Math.random() - 0.5) * 4;
+                                el.style.transform = `translate(${shakeX}px, ${shakeY}px)`;
+                            });
+                        }, 30);
+                    }
+                    break;
+            }
+        }
+
+        // Helper giúp tăng/bớt phần tử chính xác tránh vẽ đè lại từ đầu gây lag cục bộ
+        function adjustElementsCount(targetCount, createElementCallback) {
+            const currentCount = activeElements.length;
+            if (currentCount < targetCount) {
+                for (let i = currentCount; i < targetCount; i++) {
+                    const el = createElementCallback();
+                    activeElements.push(el);
+                }
+            } else if (currentCount > targetCount) {
+                for (let i = currentCount - 1; i >= targetCount; i--) {
+                    if (activeElements[i]) {
+                        activeElements[i].remove();
+                        activeElements.pop();
+                    }
+                }
+            }
+        }
+
+        // Xóa sạch các bộ đếm thời gian của sandbox
+        function clearSandboxIntervals() {
+            if (sandboxInterval) {
+                clearInterval(sandboxInterval);
+                sandboxInterval = null;
+            }
+        }
+
+        // Ghi lại số liệu thực tế đã đạt được của một bước vừa chạy xong
+        function saveStepMetrics(stepId) {
+            const avgFps = currentStepFpsSamples.length > 0
+                ? Math.round(currentStepFpsSamples.reduce((a, b) => a + b, 0) / currentStepFpsSamples.length)
+                : fps;
+
+            const fpsPenaltyFactor = Math.min(avgFps, 60) / 60;
+            const normalizedMultiplier = 1 / deviceProfile.scaleFactor;
+            const stepScore = Math.round(currentStepMaxLoad * fpsPenaltyFactor * 12 * normalizedMultiplier);
+
+            benchmarkMetricsHistory.push({
+                stepId: stepId,
+                name: STEPS_CONFIG[stepId - 1].name,
+                avgFps: avgFps,
+                maxLoad: currentStepMaxLoad,
+                score: stepScore
+            });
+
+            currentStepFpsSamples = [];
+            currentStepMaxLoad = 0;
+        }
+
+        // Hiển thị thông báo Toast tuỳ chỉnh thay cho alert()
+        function showToast(message) {
+            const toast = document.getElementById("custom-toast");
+            const toastMsg = document.getElementById("toast-message");
+            toastMsg.innerText = message;
+            toast.className = "fixed bottom-4 right-4 bg-gray-900 text-white text-xs px-4 py-3 rounded-xl shadow-2xl transition-all duration-300 transform translate-y-0 opacity-100 z-50 flex items-center gap-2";
+            setTimeout(() => {
+                toast.className = "fixed bottom-4 right-4 bg-gray-900 text-white text-xs px-4 py-3 rounded-xl shadow-2xl transition-all duration-300 transform translate-y-20 opacity-0 pointer-events-none z-50 flex items-center gap-2";
+            }, 3000);
+        }
+
+        // Chọn một bước và kích hoạt nó ngay lập tức
+        function selectAndRunStep(stepId) {
+            if (stepId < 1 || stepId > 10) return;
+            
+            activeStep = stepId;
+            currentStepBadge.innerText = `BƯỚC ${stepId} / 10`;
+            currentStepTitle.innerText = STEPS_CONFIG[stepId - 1].name;
+            
+            currentLoad = deviceProfile.startingLoad;
+            aiCycleCounter = 0;
+            aiCycleCount.innerText = "0";
+
+            currentStepFpsSamples = [];
+            currentStepMaxLoad = currentLoad;
+
+            updateStepsListUI();
+            executeStepAction(stepId);
+            
+            stepSecondsLeft = 60;
+            stepTimeLeft.innerText = `${stepSecondsLeft}s`;
+
+            if (isAutoMode) {
+                systemStatus.innerText = `Chạy Auto: Bước ${stepId}`;
+                systemStatus.className = "px-3 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-800";
+            } else {
+                systemStatus.innerText = `Chạy thủ công: Bước ${stepId}`;
+                systemStatus.className = "px-3 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800";
+            }
+        }
+
+        // Bắt đầu chu kỳ dếm ngược thời gian
+        function startGlobalTimers() {
+            stopGlobalTimers();
+
+            globalTimerInterval = setInterval(() => {
+                if (activeStep > 0) {
+                    stepSecondsLeft--;
+                    stepTimeLeft.innerText = `${stepSecondsLeft}s`;
+
+                    if (stepSecondsLeft <= 0) {
+                        saveStepMetrics(activeStep); 
+                        
+                        if (isAutoMode) {
+                            if (activeStep < 10) {
+                                selectAndRunStep(activeStep + 1);
+                            } else {
+                                stopGlobalTimers();
+                                clearSandboxIntervals();
+                                showScoreboard(); 
+                            }
+                        } else {
+                            stepSecondsLeft = 60;
+                            stepTimeLeft.innerText = `${stepSecondsLeft}s`;
+                        }
+                    }
+                }
+
+                updateTimerDisplay();
+                runAILagDetection();
+
+            }, 1000);
+        }
+
+        // Dừng chu kỳ đếm thời gian
+        function stopGlobalTimers() {
+            if (globalTimerInterval) {
+                clearInterval(globalTimerInterval);
+                globalTimerInterval = null;
+            }
+        }
+
+        function updateTimerDisplay() {
+            if (!isAutoMode) {
+                timerDisplay.innerText = "FREE";
+                return;
+            }
+            const totalSecondsLeft = ((10 - activeStep) * 60) + stepSecondsLeft;
+            const mins = Math.floor(totalSecondsLeft / 60);
+            const secs = totalSecondsLeft % 60;
+            timerDisplay.innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function startAutoBenchmark() {
+            isAutoMode = true;
+            isAutoLoadAI = true;
+            benchmarkMetricsHistory = []; 
+            btnToggleAutoAI.innerText = "Tắt Auto AI Tải";
+            btnToggleAutoAI.className = "bg-amber-600 hover:bg-amber-700 text-white font-semibold py-2.5 px-3 rounded-xl text-sm transition duration-150";
+            
+            maxLoadRecorded = 0;
+            minLoadRecorded = 999999;
+            totalLoadRecorded = 0;
+            loadRecordsCount = 0;
+
+            selectAndRunStep(1);
+            startGlobalTimers();
+        }
+
+        // Tạo giao diện thống kê điểm số sau khi kết thúc kịch bản 10 phút
+        function showScoreboard() {
+            activeStep = 0;
+            updateStepsListUI();
+            
+            // Thoát chế độ toàn màn hình khi có bảng điểm để người dùng thao tác lưu trữ dễ dàng
+            exitFullscreen();
+            unlockGlobalInteractions();
+            sandbox.classList.remove("sandbox-locked");
+
+            const totalScore = benchmarkMetricsHistory.reduce((sum, item) => sum + item.score, 0);
+            
+            let rankTitle = "";
+            let rankDesc = "";
+            let badgeColorClass = "";
+            let badgeSvg = "";
+
+            if (totalScore >= 75000) {
+                rankTitle = "HẠNG THẦN THOẠI (GOD-LIKE)";
+                rankDesc = `Điểm số cực đại đo đạc thành công trên phân vùng đồ họa ${deviceProfile.type}. Phần cứng siêu việt, xử lý mượt các kịch bản tàn khốc mà không nghẽn luồng.`;
+                badgeColorClass = "bg-red-50 text-red-700 border-red-200";
+                badgeSvg = `<svg class="w-14 h-14 text-red-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>`;
+            } else if (totalScore >= 45000) {
+                rankTitle = "SIÊU PHẨM (FLAGSHIP)";
+                rankDesc = `Dòng thiết bị ${deviceProfile.type} thuộc phân khúc cao cấp nhất. Trải nghiệm hoạt họa hoạt động vô cùng trơn tru, xử lý reflow/repaint cực nhanh.`;
+                badgeColorClass = "bg-orange-50 text-orange-700 border-orange-200";
+                badgeSvg = `<svg class="w-14 h-14 text-orange-500" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>`;
+            } else if (totalScore >= 20000) {
+                rankTitle = "TẬP TRUNG HIỆU NĂNG (MID-RANGE)";
+                rankDesc = `Thiết bị đạt mức độ trung cấp cân bằng. Phục vụ hoàn hảo các tác vụ hàng ngày của dòng máy ${deviceProfile.type} nhưng bắt đầu mỏi mệt khi AI dồn lượng tải lên cao.`;
+                badgeColorClass = "bg-blue-50 text-blue-700 border-blue-200";
+                badgeSvg = `<svg class="w-14 h-14 text-blue-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"/></svg>`;
+            } else {
+                rankTitle = "VĂN PHÒNG & GIẢI TRÍ NHẸ (LOW-END)";
+                rankDesc = `Phù hợp lướt Web thông thường. Sẽ bị tụt sụt FPS đáng kể nếu hoạt hành liên hồi hoặc khi pin yếu (như dưới 20%).`;
+                badgeColorClass = "bg-gray-100 text-gray-700 border-gray-300";
+                badgeSvg = `<svg class="w-14 h-14 text-gray-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 4a3 3 0 00-3 3v6a3 3 0 003 3h10a3 3 0 003-3V7a3 3 0 00-3-3H5zm-1 9v-1h5v1H4zm7 0v-1h5v1h-5z" clip-rule="evenodd"/></svg>`;
+            }
+
+            let tableRowsHtml = "";
+            benchmarkMetricsHistory.forEach(item => {
+                tableRowsHtml += `
+                    <tr class="border-b border-gray-100 text-[11px] text-gray-600">
+                        <td class="py-2 font-bold text-gray-700 text-left">Bước ${item.stepId}</td>
+                        <td class="py-2 text-left truncate max-w-[150px] sm:max-w-none" title="${item.name}">${item.name}</td>
+                        <td class="py-2 font-mono text-center text-blue-600 font-semibold">${item.avgFps}</td>
+                        <td class="py-2 font-mono text-center text-indigo-600 font-semibold">${item.maxLoad}</td>
+                        <td class="py-2 font-mono text-right text-gray-900 font-bold">${item.score.toLocaleString()}</td>
+                    </tr>
+                `;
+            });
+
+            sandboxContent.innerHTML = `
+                <div class="w-full h-full absolute inset-0 overflow-y-auto bg-white p-6 flex flex-col gap-6 select-text z-20">
+                    <div class="flex flex-col sm:flex-row items-center gap-4 pb-4 border-b border-gray-200">
+                        <div class="shrink-0 p-2 rounded-2xl border-2 ${badgeColorClass} flex items-center justify-center">
+                            ${badgeSvg}
+                        </div>
+                        <div class="text-center sm:text-left flex-grow">
+                            <div class="text-[10px] font-bold tracking-widest text-indigo-600 uppercase">KẾT QUẢ ĐO ĐẠC THỰC TẾ</div>
+                            <h3 class="text-xl font-black text-gray-900 mt-0.5" id="share-rank-title">${rankTitle}</h3>
+                            <p class="text-xs text-gray-500 mt-1 leading-relaxed max-w-xl">${rankDesc}</p>
+                        </div>
+                        <div class="text-center sm:text-right shrink-0 mt-2 sm:mt-0">
+                            <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400">TỔNG ĐIỂM (HIỆU CHUẨN)</div>
+                            <div class="text-4xl font-black text-indigo-600 font-mono mt-1" id="share-total-score">${totalScore.toLocaleString()}</div>
+                        </div>
+                    </div>
+
+                    <div class="flex-grow">
+                        <div class="text-xs text-gray-400 mb-2 flex justify-between items-center">
+                            <span>Phân hệ kiểm thử của thiết bị: ${deviceProfile.icon} ${deviceProfile.type}</span>
+                            <span class="font-bold text-indigo-600">Đã chuẩn hóa độ phân giải màn hình</span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full table-auto">
+                                <thead>
+                                    <tr class="border-b border-gray-200 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                                        <th class="pb-2 text-left w-14">Bước</th>
+                                        <th class="pb-2 text-left">Nội dung test</th>
+                                        <th class="pb-2 text-center w-16">FPS TB</th>
+                                        <th class="pb-2 text-center w-24">Tải Cực Đại</th>
+                                        <th class="pb-2 text-right w-20">Điểm số</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${tableRowsHtml}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col sm:flex-row gap-3 pt-4 border-t border-gray-100">
+                        <button id="btn-copy-results" class="flex-grow bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition duration-150 flex items-center justify-center gap-2 shadow-sm">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
+                            SAO CHÉP KẾT QUẢ ĐỂ CHIA SẺ
+                        </button>
+                        <button id="btn-restart-from-scoreboard" class="bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-2.5 px-5 rounded-xl text-xs transition duration-150 border border-gray-300">
+                            KIỂM TRA LẠI
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            currentStepBadge.innerText = "HOÀN THÀNH TEST";
+            currentStepTitle.innerText = "Kết quả đánh giá hiệu năng phần cứng thực tế";
+            sandboxElementsCount.innerText = `Tổng điểm: ${totalScore.toLocaleString()}`;
+            systemStatus.innerText = "Đã xuất điểm";
+            systemStatus.className = "px-3 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800";
+            aiStatus.innerText = "AI Monitor: Đang ngủ";
+            aiStatus.className = "px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800";
+
+            document.getElementById("btn-copy-results").addEventListener("click", () => {
+                copyBenchmarkToClipboard(totalScore, rankTitle);
+            });
+            document.getElementById("btn-restart-from-scoreboard").addEventListener("click", () => {
+                resetAllMetrics();
+                startAutoBenchmark();
+            });
+        }
+
+        function copyBenchmarkToClipboard(totalScore, rankTitle) {
+            let reportText = `[HARDWARE REAL BENCHMARK RESULTS]\n`;
+            reportText += `------------------------------------\n`;
+            reportText += `THIẾT BỊ: ${deviceProfile.icon} ${deviceProfile.type}\n`;
+            reportText += `TỔNG ĐIỂM: ${totalScore.toLocaleString()} PTS (Chuẩn hóa)\n`;
+            reportText += `XẾP HẠNG: ${rankTitle}\n`;
+            reportText += `------------------------------------\n`;
+            reportText += `CHI TIẾT 10 BƯỚC KHẮC NGHIỆT NHẤT:\n`;
+            
+            benchmarkMetricsHistory.forEach(item => {
+                reportText += `- Bước ${item.stepId}: ${item.name} | FPS TB: ${item.avgFps} | Tải Cực Đại: ${item.maxLoad} | Điểm: ${item.score.toLocaleString()} pts\n`;
+            });
+            
+            reportText += `------------------------------------\n`;
+            reportText += `* Đo đạc và AI tự động cân bằng tải thực hiện hoàn toàn trực tiếp trên phần cứng thật của trình duyệt.`;
+
+            const tempTextArea = document.createElement("textarea");
+            tempTextArea.value = reportText;
+            tempTextArea.style.position = "absolute";
+            tempTextArea.style.left = "-9999px";
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showToast("Đã sao chép báo cáo kết quả vào Clipboard!");
+                } else {
+                    showToast("Không thể sao chép tự động.");
+                }
+            } catch (err) {
+                showToast("Lỗi sao chép.");
+            }
+            
+            document.body.removeChild(tempTextArea);
+        }
+
+        // Đưa mọi thứ về trạng thái bình thường (Hồi phục hoàn toàn các điều khiển)
+        function stopAllTests() {
+            isAutoMode = false;
+            stopGlobalTimers();
+            clearSandboxIntervals();
+            activeStep = 0;
+            activeElements = [];
+            
+            // Thoát chế độ toàn màn hình khi dừng
+            exitFullscreen();
+            unlockGlobalInteractions();
+            
+            sandboxContent.innerHTML = "";
+            
+            // Phục hồi lại trạng thái bình thường của "Hệ thống rảnh rỗi"
+            sandboxIntro.classList.remove("-translate-y-full", "opacity-0", "pointer-events-none");
+            sandboxIntro.classList.add("translate-y-0", "opacity-100");
+            sandbox.classList.remove("sandbox-locked"); 
+
+            currentStepBadge.innerText = "Hệ Thống Rảnh Rỗi";
+            currentStepTitle.innerText = "Hãy chọn Bắt đầu để kiểm tra hiệu năng thiết bị";
+            sandboxElementsCount.innerText = "Số phần tử: 0";
+            stepTimeLeft.innerText = "0s";
+            timerDisplay.innerText = "00:00";
+            
+            systemStatus.innerText = "Đã dừng";
+            systemStatus.className = "px-3 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800";
+            aiStatus.innerText = "AI Monitor: Đang ngủ";
+            aiStatus.className = "px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800";
+
+            metricAiLag.innerText = "Đang ngủ";
+            metricAiLag.className = "text-gray-400 font-bold";
+
+            updateStepsListUI();
+        }
+
+        function resetAllMetrics() {
+            stopAllTests();
+            
+            fps = 0;
+            frameTime = 0;
+            maxLoadRecorded = 0;
+            minLoadRecorded = 999999;
+            totalLoadRecorded = 0;
+            loadRecordsCount = 0;
+            benchmarkMetricsHistory = [];
+            currentStepFpsSamples = [];
+            currentStepMaxLoad = 0;
+
+            metricFps.innerText = "0";
+            metricFrameTime.innerText = "0 ms";
+            metricLoadCurrent.innerText = "0";
+            metricLoadAvg.innerText = "0";
+            metricLoadMax.innerText = "0";
+            metricLoadMin.innerText = "0";
+            
+            systemStatus.innerText = "Sẵn sàng";
+            systemStatus.className = "px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800";
+            
+            // Nhận diện lại khi reset
+            detectDeviceAndCalibrate();
+        }
+
+        btnAutoTest.addEventListener("click", () => {
+            startAutoBenchmark();
+        });
+
+        btnToggleAutoAI.addEventListener("click", () => {
+            isAutoLoadAI = !isAutoLoadAI;
+            if (isAutoLoadAI) {
+                btnToggleAutoAI.innerText = "Tắt Auto AI Tải";
+                btnToggleAutoAI.className = "bg-amber-600 hover:bg-amber-700 text-white font-semibold py-2.5 px-3 rounded-xl text-sm transition duration-150";
+                aiStatus.innerText = "AI Monitor: Đang chạy";
+                aiStatus.className = "px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800";
+            } else {
+                btnToggleAutoAI.innerText = "Bật Auto AI Tải";
+                btnToggleAutoAI.className = "bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 px-3 rounded-xl text-sm transition duration-150";
+                aiStatus.innerText = "AI Monitor: Tạm dừng";
+                aiStatus.className = "px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-500";
+            }
+        });
+
+        btnStop.addEventListener("click", () => {
+            stopAllTests();
+        });
+
+        btnReset.addEventListener("click", () => {
+            resetAllMetrics();
+        });
+
+        btnExitVirtualFs.addEventListener("click", () => {
+            stopAllTests();
+        });
+
+        window.onload = function() {
+            renderStepsList();
+            runPerformanceTracker();
+            // Tự động quét và hiệu chỉnh thông số phần cứng theo loại thiết bị khi mở trang
+            detectDeviceAndCalibrate();
+        };
+
+        window.addEventListener("resize", () => {
+            // Chạy hiệu chuẩn lại nếu xoay màn hình hoặc đổi kích thước cửa sổ trình duyệt
+            detectDeviceAndCalibrate();
+            if (activeStep > 0) {
+                syncSandboxElements();
+            }
+        });
+
+    </script>
+</body>
+</html>
