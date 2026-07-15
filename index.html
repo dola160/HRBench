@@ -75,7 +75,8 @@
                 <div class="w-3 h-3 rounded-full bg-red-500 id-pulse animate-pulse"></div>
                 <h1 class="text-xl font-bold tracking-tight text-gray-800">HARDWARE REAL BENCHMARK</h1>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
+                <span id="wakelock-status" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600 border border-gray-200">💡 Màn hình: Chờ</span>
                 <span id="system-status" class="px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">Sẵn sàng</span>
                 <span id="ai-status" class="px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">AI Monitor: Đang ngủ</span>
             </div>
@@ -313,6 +314,10 @@
         let sandboxInterval = null;
         let aiCycleCounter = 0;
 
+        // Quản lý Wake Lock chống tắt màn hình (Gốc và Fallback)
+        let wakeLockSentinel = null;
+        let fallbackVideoEl = null;
+
         // DOM elements
         const sandbox = document.getElementById("sandbox");
         const sandboxWrapper = document.getElementById("sandbox-wrapper");
@@ -344,6 +349,117 @@
         const sandboxElementsCount = document.getElementById("sandbox-elements-count");
         const stepTimeLeft = document.getElementById("step-time-left");
         const aiCycleCount = document.getElementById("ai-cycle-count");
+        const wakelockStatusBadge = document.getElementById("wakelock-status");
+
+        // HỆ THỐNG CHỐNG TẮT MÀN HÌNH CHUYÊN NGHIỆP (REAL WAKE LOCK API & FALLBACK)
+        async function acquireWakeLock() {
+            // 1. Thử dùng API Screen Wake Lock chuẩn chỉnh của trình duyệt
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLockSentinel = await navigator.wakeLock.request('screen');
+                    updateWakeLockUI(true, "API Chuẩn");
+                    
+                    // Lắng nghe sự kiện Wake Lock bị hủy bỏ đột ngột (ví dụ khi thiết bị pin yếu hoặc đổi tab)
+                    wakeLockSentinel.addEventListener('release', () => {
+                        console.log('Screen Wake Lock đã được giải phóng');
+                    });
+                } catch (err) {
+                    console.warn("Lỗi thiết lập Wake Lock API chuẩn, chuyển qua dự phòng luồng Video: ", err);
+                    startFallbackVideoWakeLock();
+                }
+            } else {
+                // 2. Chế độ dự phòng: Dùng dynamic canvas video stream
+                startFallbackVideoWakeLock();
+            }
+        }
+
+        function releaseWakeLock() {
+            if (wakeLockSentinel !== null) {
+                wakeLockSentinel.release().then(() => {
+                    wakeLockSentinel = null;
+                });
+            }
+            stopFallbackVideoWakeLock();
+            updateWakeLockUI(false);
+        }
+
+        // Tái lập Wake Lock tự động khi quay lại tab nếu người dùng lỡ chuyển tab
+        async function handleVisibilityChange() {
+            if (wakeLockSentinel !== null && document.visibilityState === 'visible') {
+                await acquireWakeLock();
+            }
+        }
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        // Kỹ thuật Canvas Dynamic Stream (Đánh lừa trình duyệt là đang xem phim thực tế)
+        function startFallbackVideoWakeLock() {
+            if (fallbackVideoEl) return;
+            
+            try {
+                fallbackVideoEl = document.createElement('video');
+                fallbackVideoEl.muted = true;
+                fallbackVideoEl.playsInline = true;
+                fallbackVideoEl.loop = true;
+                fallbackVideoEl.style.position = 'absolute';
+                fallbackVideoEl.style.width = '1px';
+                fallbackVideoEl.style.height = '1px';
+                fallbackVideoEl.style.opacity = '0.001';
+                fallbackVideoEl.style.pointerEvents = 'none';
+
+                // Tạo Canvas vẽ chu kỳ sáng tối siêu nhẹ để sinh Stream thực tế liên tục
+                const canvas = document.createElement('canvas');
+                canvas.width = 16;
+                canvas.height = 16;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = 'black';
+                ctx.fillRect(0, 0, 16, 16);
+
+                const stream = canvas.captureStream(1); // 1 khung hình/giây (vừa đủ sáng, 0% tốn tài nguyên)
+                fallbackVideoEl.srcObject = stream;
+                document.body.appendChild(fallbackVideoEl);
+
+                fallbackVideoEl.play().then(() => {
+                    updateWakeLockUI(true, "Video Stream");
+                }).catch(err => {
+                    console.warn("Lỗi tự động phát video stream chống ngủ: ", err);
+                    updateWakeLockUI(false, "Thất bại");
+                });
+
+                // Chạy thay đổi cấu trúc pixel Canvas để duy trì luồng render không bị đóng băng
+                const intervalId = setInterval(() => {
+                    ctx.fillStyle = ctx.fillStyle === '#000000' ? '#000001' : '#000000';
+                    ctx.fillRect(0, 0, 16, 16);
+                }, 1000);
+
+                fallbackVideoEl.dataset.intervalId = intervalId;
+            } catch (e) {
+                console.error("Không hỗ trợ giải pháp chống tắt màn hình dự phòng: ", e);
+                updateWakeLockUI(false, "Không hỗ trợ");
+            }
+        }
+
+        function stopFallbackVideoWakeLock() {
+            if (fallbackVideoEl) {
+                const intervalId = fallbackVideoEl.dataset.intervalId;
+                if (intervalId) {
+                    clearInterval(parseInt(intervalId));
+                }
+                fallbackVideoEl.pause();
+                fallbackVideoEl.srcObject = null;
+                fallbackVideoEl.remove();
+                fallbackVideoEl = null;
+            }
+        }
+
+        function updateWakeLockUI(active, method = "") {
+            if (active) {
+                wakelockStatusBadge.innerText = `💡 Chống tắt: Bật (${method})`;
+                wakelockStatusBadge.className = "px-3 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200 animate-pulse";
+            } else {
+                wakelockStatusBadge.innerText = "💡 Màn hình: Chờ";
+                wakelockStatusBadge.className = "px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600 border border-gray-200";
+            }
+        }
 
         // KHÓA TƯƠNG TÁC TẬP TRUNG TOÀN CỤC
         const preventDefaultActions = (e) => {
@@ -1206,6 +1322,9 @@
             totalLoadRecorded = 0;
             loadRecordsCount = 0;
 
+            // Kích hoạt chống tắt màn hình tức thì
+            acquireWakeLock();
+
             selectAndRunStep(1);
             startGlobalTimers();
         }
@@ -1215,6 +1334,9 @@
             activeStep = 0;
             updateStepsListUI();
             
+            // Giải phóng chống tắt màn hình khi kết thúc toàn bộ chu kỳ 10 phút
+            releaseWakeLock();
+
             // Thoát chế độ toàn màn hình khi có bảng điểm để người dùng thao tác lưu trữ dễ dàng
             exitFullscreen();
             unlockGlobalInteractions();
@@ -1376,6 +1498,9 @@
             activeStep = 0;
             activeElements = [];
             
+            // Giải phóng hệ thống chống tắt màn hình
+            releaseWakeLock();
+
             // Thoát chế độ toàn màn hình khi dừng
             exitFullscreen();
             unlockGlobalInteractions();
